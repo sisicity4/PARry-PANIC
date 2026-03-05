@@ -64,6 +64,20 @@ npm run dev
 npm run build
 ```
 
+## Vercelデプロイ
+### プレビュー（推奨）
+```bash
+npm run deploy:vercel:preview
+```
+
+### 本番
+```bash
+npm run deploy:vercel:prod
+```
+
+- `vercel.json` で Vite 向けビルド設定と `dist` 配信を固定しています。
+- 初回デプロイ時はVercel CLIの認証/プロジェクト連携が求められます。
+
 ## 操作方法
 - 移動: `WASD`（矢印キー対応）
 - 方向: マウス
