@@ -4,6 +4,8 @@ import { runtime } from "../core/runtime";
 import { SCENE_KEYS } from "./keys";
 
 export class MainMenuScene extends Phaser.Scene {
+  private startStatusText?: Phaser.GameObjects.Text;
+
   constructor() {
     super(SCENE_KEYS.MAIN_MENU);
   }
@@ -46,6 +48,26 @@ export class MainMenuScene extends Phaser.Scene {
       color: "#dfecff",
     }).setOrigin(0.5, 0.5);
 
+    const guidePanel = this.add.rectangle(GAME_WIDTH / 2, 388, 700, 88, 0x0c1538, 0.66)
+      .setStrokeStyle(2, 0x5f8eea, 0.45);
+
+    guidePanel.setDepth(0);
+
+    this.add
+      .text(
+        GAME_WIDTH / 2,
+        388,
+        "PARRY GUIDE: 白縁の敵は攻撃予告。攻撃が当たる直前にパリィで成功。成功すると8拍Modifier+大カウンター。",
+        {
+          fontFamily: "'Noto Sans JP', sans-serif",
+          fontSize: "16px",
+          color: "#c8e1ff",
+          align: "center",
+          wordWrap: { width: 650 },
+        },
+      )
+      .setOrigin(0.5, 0.5);
+
     const button = this.add
       .rectangle(GAME_WIDTH / 2, 460, 290, 82, 0x63e3ff, 0.92)
       .setStrokeStyle(3, 0xffffff, 0.7)
@@ -70,7 +92,17 @@ export class MainMenuScene extends Phaser.Scene {
     });
 
     const startRun = async (): Promise<void> => {
-      await runtime.audio.start();
+      let audioReady = true;
+      try {
+        await runtime.audio.start();
+      } catch (_error) {
+        audioReady = false;
+      }
+
+      if (!audioReady) {
+        this.startStatusText?.setText("Audio初期化に失敗したため、音声機能を限定して開始します。");
+      }
+
       const runSeed = Date.now() >>> 0;
       this.scene.start(SCENE_KEYS.GAME, { runSeed });
     };
@@ -89,6 +121,14 @@ export class MainMenuScene extends Phaser.Scene {
       fontSize: "18px",
       color: "#b9c6ff",
     }).setOrigin(0.5, 0.5);
+
+    this.startStatusText = this.add
+      .text(GAME_WIDTH / 2, 612, "", {
+        fontFamily: "'Noto Sans JP', sans-serif",
+        fontSize: "14px",
+        color: "#ffd8a8",
+      })
+      .setOrigin(0.5, 0.5);
   }
 
   private drawBackdrop(): void {

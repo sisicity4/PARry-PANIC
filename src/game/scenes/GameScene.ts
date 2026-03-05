@@ -6,6 +6,7 @@ import {
   FIXED_STEP_MS,
   FIXED_STEP_SECONDS,
   GAME_HEIGHT,
+  GAME_WIDTH,
   PLAYER_BASE_SPEED,
   PLAYER_MAX_HEALTH,
   PLAYER_MAX_STAMINA,
@@ -152,7 +153,15 @@ export class GameScene extends Phaser.Scene {
   private debugText!: Phaser.GameObjects.Text;
   private statusText!: Phaser.GameObjects.Text;
   private micText!: Phaser.GameObjects.Text;
+  private guideText!: Phaser.GameObjects.Text;
+  private combatEventText!: Phaser.GameObjects.Text;
   private pulseRing!: Phaser.GameObjects.Arc;
+
+  private combatEventMessage = "";
+  private combatEventColor = "#b7edff";
+  private combatEventRemainingSec = 0;
+  private parryWindowResolved = true;
+  private lastParryOutcome: "none" | "success" | "miss" = "none";
 
   private audioLast: AudioFeatureTick = {
     timestampMs: 0,
@@ -214,18 +223,40 @@ export class GameScene extends Phaser.Scene {
         fontFamily: "'Noto Sans JP', sans-serif",
         fontSize: "16px",
         color: "#e9f0ff",
+        lineSpacing: 2,
       })
       .setScrollFactor(0)
       .setDepth(1001);
 
     this.micText = this.add
-      .text(18, 154, "", {
+      .text(18, 172, "", {
         fontFamily: "'Noto Sans JP', sans-serif",
         fontSize: "14px",
         color: "#c8f2ff",
       })
       .setScrollFactor(0)
       .setDepth(1001);
+
+    this.guideText = this.add
+      .text(18, 202, "PARRY: 白縁の敵攻撃が当たる直前に入力（右クリック/Shift）", {
+        fontFamily: "'Noto Sans JP', sans-serif",
+        fontSize: "13px",
+        color: "#c3d7ff",
+      })
+      .setScrollFactor(0)
+      .setDepth(1001);
+
+    this.combatEventText = this.add
+      .text(GAME_WIDTH / 2, 88, "", {
+        fontFamily: "'Bebas Neue', 'Noto Sans JP', sans-serif",
+        fontSize: "36px",
+        color: this.combatEventColor,
+        stroke: "#0f1638",
+        strokeThickness: 6,
+      })
+      .setOrigin(0.5, 0.5)
+      .setScrollFactor(0)
+      .setDepth(1002);
 
     this.debugText = this.add
       .text(18, GAME_HEIGHT - 170, "", {
@@ -305,6 +336,10 @@ export class GameScene extends Phaser.Scene {
 
     this.simulationTimeSec += dt;
     this.survivalTimeSec += dt;
+    this.combatEventRemainingSec = Math.max(0, this.combatEventRemainingSec - dt);
+    if (this.combatEventRemainingSec <= 0 && this.combatEventText.text.length > 0) {
+      this.combatEventText.setText("");
+    }
 
     if (this.hitstopSec > 0) {
       this.hitstopSec = Math.max(0, this.hitstopSec - dt);
@@ -314,10 +349,18 @@ export class GameScene extends Phaser.Scene {
       this.worldFreezeSec = Math.max(0, this.worldFreezeSec - dt);
     }
 
+    const hadParryWindow = this.player.parryWindowSec > 0;
+
     this.player.parryCooldownSec = Math.max(0, this.player.parryCooldownSec - dt);
     this.player.parryWindowSec = Math.max(0, this.player.parryWindowSec - dt);
     this.player.invulnSec = Math.max(0, this.player.invulnSec - dt);
     this.player.counterWindowSec = Math.max(0, this.player.counterWindowSec - dt);
+
+    if (hadParryWindow && this.player.parryWindowSec <= 0 && !this.parryWindowResolved) {
+      this.parryWindowResolved = true;
+      this.lastParryOutcome = "miss";
+      this.pushCombatEvent("PARRY MISS", "#ffd6a6", 0.45);
+    }
 
     const staminaRegen = this.player.staminaRegenPerSec * dt;
     this.player.stamina = clamp(this.player.stamina + staminaRegen, 0, this.player.maxStamina);
@@ -669,10 +712,13 @@ export class GameScene extends Phaser.Scene {
     this.player.invulnSec = Math.max(this.player.invulnSec, 0.28);
     this.player.counterWindowSec = 0.85;
     this.player.parryWindowSec = 0;
+    this.parryWindowResolved = true;
+    this.lastParryOutcome = "success";
     this.hitstopSec = 0.06;
 
     const chosen = this.pickModifier();
     this.modifiers.apply(chosen, 8);
+    this.pushCombatEvent(`PARRY SUCCESS + ${chosen}(8)`, "#9fffd7", 0.95);
 
     for (const enemy of this.enemies) {
       const dx = enemy.sprite.x - sourceX;
@@ -701,12 +747,16 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (!this.spendStamina(PARRY_STAMINA_COST)) {
+      this.pushCombatEvent("NO STAMINA FOR PARRY", "#ffb8c9", 0.45);
       return;
     }
 
     const windowMs = this.player.stamina <= EXHAUSTED_THRESHOLD ? EXHAUSTED_PARRY_WINDOW_MS : BASE_PARRY_WINDOW_MS;
     this.player.parryWindowSec = windowMs / 1000;
     this.player.parryCooldownSec = 0.26;
+    this.parryWindowResolved = false;
+    this.lastParryOutcome = "none";
+    this.pushCombatEvent(`PARRY WINDOW ${windowMs}ms`, "#b7edff", 0.34);
     this.playerBody.setFillStyle(0x95ffd8, 1);
   }
 
@@ -787,6 +837,7 @@ export class GameScene extends Phaser.Scene {
 
     if (forcedCounter) {
       this.cameras.main.flash(80, 255, 240, 180, true);
+      this.pushCombatEvent("COUNTER SLASH!", "#ffe6a5", 0.5);
     }
 
     this.playerBody.setFillStyle(beatSynced ? 0xfff0b0 : 0x7df6ff, 1);
@@ -794,10 +845,12 @@ export class GameScene extends Phaser.Scene {
 
   private handleShout(): void {
     if (!this.spendStamina(SHOUT_STAMINA_COST)) {
+      this.pushCombatEvent("NO STAMINA FOR SHOUT", "#ffb8c9", 0.45);
       return;
     }
 
     this.worldFreezeSec = 0.35;
+    this.pushCombatEvent("SHOUT BREAK", "#ffbaba", 0.55);
 
     for (const enemy of this.enemies) {
       const dx = enemy.sprite.x - this.player.x;
@@ -987,6 +1040,13 @@ export class GameScene extends Phaser.Scene {
       this.playerBody.setFillStyle(fill, 1);
     }
 
+    if (this.player.parryWindowSec > 0) {
+      const pulse = 0.62 + Math.sin(this.simulationTimeSec * 80) * 0.26;
+      this.playerBody.setStrokeStyle(4, 0xb9ffe6, clamp(pulse, 0.35, 1));
+    } else {
+      this.playerBody.setStrokeStyle(0, 0x000000, 0);
+    }
+
     for (const obstacle of this.obstacles) {
       if (this.modifiers.has("LightFlickerBoost")) {
         const flicker = 0.5 + this.audioLast.spectralCentroid * 0.35 + Math.sin(this.simulationTimeSec * 18) * 0.08;
@@ -1017,12 +1077,14 @@ export class GameScene extends Phaser.Scene {
     this.statusText.setText([
       `HP ${this.player.health.toFixed(0)} / ${this.player.maxHealth}   ST ${this.player.stamina.toFixed(0)} / ${this.player.maxStamina}`,
       `Beat ${this.audioLast.beatCount}  Score ${Math.floor(this.score)}  Parries ${this.parryCount}`,
+      `ParryWindow ${Math.round(this.player.parryWindowSec * 1000)}ms / Counter ${Math.round(this.player.counterWindowSec * 1000)}ms`,
       modifierText.length > 0 ? `Modifiers: ${modifierText}` : "Modifiers: none",
     ]);
 
     const audioSnapshot = runtime.audio.getSnapshot();
     const micState = audioSnapshot.micState;
     this.micText.setText(`Mic: ${micState} / Gate: ${audioSnapshot.shoutGateOpen ? "OPEN" : "CLOSED"} / RMS ${audioSnapshot.rms.toFixed(3)}`);
+    this.guideText.setText("PARRY: 白縁の敵攻撃が当たる直前に入力（右クリック/Shift）");
   }
 
   private drawBar(
@@ -1052,8 +1114,17 @@ export class GameScene extends Phaser.Scene {
       `centroid ${audio.spectralCentroid.toFixed(2)} | bass ${audio.bassEnergy.toFixed(2)} | rms ${audio.rms.toFixed(3)}`,
       `spawnRate ${this.spawnIntensity.toFixed(2)} | enemySpeed x${this.enemySpeedMultiplier.toFixed(2)} | aggression ${this.aggression.toFixed(2)}`,
       `parryWindow ${Math.round(this.player.parryWindowSec * 1000)}ms | counter ${this.player.counterWindowSec.toFixed(2)}s | freeze ${this.worldFreezeSec.toFixed(2)}s`,
+      `parryOutcome ${this.lastParryOutcome}`,
       `section(fallback): beat/64 => ${Math.floor(audio.beatCount / 64) + 1} / 3`,
     ]);
+  }
+
+  private pushCombatEvent(message: string, color: string, durationSec: number): void {
+    this.combatEventMessage = message;
+    this.combatEventColor = color;
+    this.combatEventRemainingSec = durationSec;
+    this.combatEventText.setColor(color);
+    this.combatEventText.setText(message);
   }
 
   private finishRun(won: boolean): void {
@@ -1131,6 +1202,9 @@ export class GameScene extends Phaser.Scene {
         vy: Number(projectile.vy.toFixed(1)),
       })),
       modifiers: this.modifiers.listActive(),
+      parryCount: this.parryCount,
+      lastParryOutcome: this.lastParryOutcome,
+      combatEvent: this.combatEventMessage,
       score: Math.floor(this.score),
       crowd: Number(this.crowdMeter.toFixed(2)),
       audio: {
